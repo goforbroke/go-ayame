@@ -12,9 +12,15 @@ import (
 	"nhooyr.io/websocket"
 	"nhooyr.io/websocket/wsjson"
 
+	"github.com/pion/mediadevices"
+	"github.com/pion/mediadevices/pkg/codec/x264"
+	"github.com/pion/mediadevices/pkg/frame"
+	"github.com/pion/mediadevices/pkg/prop"
 	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3"
+
+	_ "github.com/pion/mediadevices/pkg/driver/camera" // This is required to register camera adapter
 )
 
 const (
@@ -278,43 +284,88 @@ func (c *Connection) sendSdp(sessionDescription *webrtc.SessionDescription) {
 
 func (c *Connection) createPeerConnection() error {
 	m := webrtc.MediaEngine{}
-	if c.Options.Audio.Enabled {
-		for _, codec := range c.Options.Audio.Codecs {
-			m.RegisterCodec(*codec, webrtc.RTPCodecTypeAudio)
-		}
-	}
+	// if c.Options.Audio.Enabled {
+	// 	for _, codec := range c.Options.Audio.Codecs {
+	// 		m.RegisterCodec(*codec, webrtc.RTPCodecTypeAudio)
+	// 	}
+	// }
 	if c.Options.Video.Enabled {
 		for _, codec := range c.Options.Video.Codecs {
 			m.RegisterCodec(*codec, webrtc.RTPCodecTypeVideo)
 		}
 	}
+	x264Params, err := x264.NewParams()
+	if err != nil {
+		panic(err)
+	}
+	x264Params.BitRate = 500_000 // 500kbps
 
-	s := webrtc.SettingEngine{}
+	codecSelector := mediadevices.NewCodecSelector(
+		mediadevices.WithVideoEncoders(&x264Params),
+	)
+
+	// s := webrtc.SettingEngine{}
 	// s.SetTrickle(c.Options.UseTrickeICE)
-
-	api := webrtc.NewAPI(webrtc.WithMediaEngine(&m), webrtc.WithSettingEngine(s))
-
-	c.trace("RTCConfiguration: %v", c.pcConfig)
+	mediaEngine := webrtc.MediaEngine{}
+	codecSelector.Populate(&mediaEngine)
+	api := webrtc.NewAPI(webrtc.WithMediaEngine(&mediaEngine))
 	pc, err := api.NewPeerConnection(c.pcConfig)
 	if err != nil {
-		return err
+		panic(err)
 	}
 
-	if c.Options.Audio.Enabled {
-		_, err = pc.AddTransceiverFromKind(webrtc.RTPCodecTypeAudio, webrtc.RtpTransceiverInit{
-			Direction: c.Options.Audio.Direction,
-		})
-		if err != nil {
-			return err
-		}
-	}
+	// api := webrtc.NewAPI(webrtc.WithMediaEngine(&m), webrtc.WithSettingEngine(s))
+
+	c.trace("RTCConfiguration: %v", c.pcConfig)
+	// pc, err := api.NewPeerConnection(c.pcConfig)
+	// if err != nil {
+	// 	return err
+	// }
+
+	// if c.Options.Audio.Enabled {
+	// 	_, err = pc.AddTransceiverFromKind(webrtc.RTPCodecTypeAudio, webrtc.RtpTransceiverInit{
+	// 		Direction: c.Options.Audio.Direction,
+	// 	})
+	// 	if err != nil {
+	// 		return err
+	// 	}
+	// }
 
 	if c.Options.Video.Enabled {
-		_, err = pc.AddTransceiverFromKind(webrtc.RTPCodecTypeVideo, webrtc.RtpTransceiverInit{
-			Direction: c.Options.Video.Direction,
+		// _, err = pc.AddTransceiverFromKind(webrtc.RTPCodecTypeVideo, webrtc.RtpTransceiverInit{
+		// 	Direction: c.Options.Video.Direction,
+		// })
+		// if err != nil {
+		// 	return err
+		// }
+		s, err := mediadevices.GetUserMedia(mediadevices.MediaStreamConstraints{
+			Video: func(c *mediadevices.MediaTrackConstraints) {
+				c.FrameFormat = prop.FrameFormat(frame.FormatI420)
+				c.Width = prop.Int(640)
+				c.Height = prop.Int(480)
+			},
+			// Audio: func(c *mediadevices.MediaTrackConstraints) {
+			// },
+			Codec: codecSelector,
 		})
 		if err != nil {
-			return err
+			panic(err)
+		}
+
+		for _, track := range s.GetTracks() {
+			track.OnEnded(func(err error) {
+				fmt.Printf("Track (ID: %s) ended with error: %v\n",
+					track.ID(), err)
+			})
+
+			_, err = pc.AddTransceiverFromTrack(track,
+				webrtc.RtpTransceiverInit{
+					Direction: webrtc.RTPTransceiverDirectionSendonly,
+				},
+			)
+			if err != nil {
+				panic(err)
+			}
 		}
 	}
 
