@@ -21,6 +21,7 @@ import (
 	"github.com/pion/webrtc/v3"
 
 	_ "github.com/pion/mediadevices/pkg/driver/camera" // This is required to register camera adapter
+	// _ "github.com/pion/mediadevices/pkg/driver/microphone" // This is required to register microphone adapter
 )
 
 const (
@@ -304,23 +305,15 @@ func (c *Connection) createPeerConnection() error {
 		mediadevices.WithVideoEncoders(&x264Params),
 	)
 
-	// s := webrtc.SettingEngine{}
-	// s.SetTrickle(c.Options.UseTrickeICE)
 	mediaEngine := webrtc.MediaEngine{}
 	codecSelector.Populate(&mediaEngine)
 	api := webrtc.NewAPI(webrtc.WithMediaEngine(&mediaEngine))
-	pc, err := api.NewPeerConnection(c.pcConfig)
-	if err != nil {
-		panic(err)
-	}
-
-	// api := webrtc.NewAPI(webrtc.WithMediaEngine(&m), webrtc.WithSettingEngine(s))
 
 	c.trace("RTCConfiguration: %v", c.pcConfig)
-	// pc, err := api.NewPeerConnection(c.pcConfig)
-	// if err != nil {
-	// 	return err
-	// }
+	pc, err := api.NewPeerConnection(c.pcConfig)
+	if err != nil {
+		return err
+	}
 
 	// if c.Options.Audio.Enabled {
 	// 	_, err = pc.AddTransceiverFromKind(webrtc.RTPCodecTypeAudio, webrtc.RtpTransceiverInit{
